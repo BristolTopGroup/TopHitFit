@@ -200,6 +200,8 @@ private:
      */
     std::vector<AJet>                   _jets;
 
+    std::vector<AJet>                   _bJets;
+
     /**
        Boolean flag which sets whether to use jet resolution
        read from file or jet resolution embedded in the physics objects.
@@ -288,6 +290,7 @@ public:
     {
         _event = Lepjets_Event(0,0);
         _jets.clear();
+        _bJets.clear();
         _jetObjRes = false;
         _Unfitted_Events.clear();
         _Fit_Results.clear();
@@ -364,6 +367,23 @@ public:
         return;
     }
 
+    void
+    AddBJet(const AJet& bjet,
+           bool useObjRes = false)
+    {
+        // Only set flag when adding the first b jet
+        // the additional b jets then WILL be treated in the
+        // same way like the first b jet.
+        if (_bJets.empty()) {
+            _jetObjRes = useObjRes;
+        }
+
+        if (_bJets.size() < MAX_HITFIT_BJET) {
+            _bJets.push_back(bjet);
+        }
+        return;
+    }
+
     /**
        @brief Set the missing transverse energy of the internal event.
      */
@@ -430,11 +450,23 @@ public:
             return 0;
         }
 
+        if (_bJets.size() < MIN_HITFIT_BJET) {
+            // For ttbar lepton+jets, a minimum of MIN_HITFIT_BJETS b jets
+            // is required
+            return 0;
+        }
+
+        if (_bJets.size() > MAX_HITFIT_BJET) {
+            // Restrict the maximum number of b jets in the fit
+            // to prevent loop overflow
+            return 0;
+        }
+
         _Unfitted_Events.clear();
         _Fit_Results.clear();
 
         // Prepare the array of jet types for permutation
-        std::vector<int> jet_types (_jets.size(), unknown_label);
+        std::vector<int> jet_types (_jets.size() + _bJets.size(), unknown_label);
         jet_types[0] = lepb_label;
         jet_types[1] = hadb_label;
         jet_types[2] = hadw1_label;
@@ -448,7 +480,6 @@ public:
         std::stable_sort(jet_types.begin(),jet_types.end());
 
         do {
-
             // begin loop over all jet permutation
             for (int nusol = 0 ; nusol != 2 ; nusol++) {
                 // loop over two neutrino solution
@@ -465,24 +496,24 @@ public:
                 // the assumed jet type (b or light).
 
                 bool skipPermutation = false;
+                unsigned int i_jetType = 0;
+                // std::cout << "Light jets" << std::endl;
                 for (size_t j = 0 ; j != _jets.size(); j++) {
-                    fev.add_jet(_JetTranslator(_jets[j],jet_types[j],_jetObjRes));
+                    fev.add_jet(_JetTranslator(_jets[j],jet_types[i_jetType],_jetObjRes));
+                    if ( jet_types[i_jetType] == lepb_label || jet_types[i_jetType] == hadb_label ) skipPermutation = true;
+                    // std::cout << jet_types[i_jetType] << std::endl;
+                    ++i_jetType;
                 }
-
-                // Check if jet type correspond to what they have been tagged as
-                for (size_t j = 0 ; j != fev.njets(); j++) {
-                    Lepjets_Event_Jet& jet = fev.jet(j);
-                    if ( jet.csv_tag() && ( jet.type() == hadw1_label || jet.type() == hadw2_label ) ) {
-                      skipPermutation = true;
-                      break;                    
-                    }
-                    else if ( !jet.csv_tag() && ( jet.type() == hadb_label || jet.type() == lepb_label ) ) {
-                      skipPermutation = true;
-                      break;   
-                    }
+                // std::cout << "B jets" << std::endl;
+                for (size_t j = 0 ; j != _bJets.size(); j++) {
+                    fev.add_jet(_JetTranslator(_bJets[j],jet_types[i_jetType],_jetObjRes));
+                    if ( jet_types[i_jetType] == hadw1_label || jet_types[i_jetType] == hadw2_label ) skipPermutation = true;
+                    // std::cout << jet_types[i_jetType] << std::endl;
+                    ++i_jetType;
                 }
 
                 if ( !skipPermutation ) {
+                  // std::cout << "Considering this permutation" << std::endl;
                   // Clone fev (intended to be fitted event)
                   // to ufev (intended to be unfitted event)
                   Lepjets_Event ufev = fev;
@@ -520,6 +551,7 @@ public:
                                                     utmass,
                                                     mt,
                                                     sigmt));
+                  // std::cout << "Chi2 : " << chisq << std::endl;
 
                 } 
             } // end loop over two neutrino solution
@@ -553,8 +585,13 @@ public:
     /**
        Minimum number of jet as input to HitFit in Tt event
      */
-    static const unsigned int MIN_HITFIT_JET =   4 ;
-
+    static const unsigned int MIN_HITFIT_JET =   2 ;
+    
+    /**
+       Minimum number of jet as input to HitFit in Tt event
+     */
+    static const unsigned int MIN_HITFIT_BJET =   2 ;
+    
     /**
        Minimum number of jet as input to HitFit in TtH event
      */
@@ -564,6 +601,11 @@ public:
        Maximum number of jet as input to HitFit in each event
      */
     static const unsigned int MAX_HITFIT_JET =   8 ;
+
+    /**
+       Maximum number of jet as input to HitFit in each event
+     */
+    static const unsigned int MAX_HITFIT_BJET =   8 ;
 
     /**
        Maximum number of HitFit permutation in each event.
